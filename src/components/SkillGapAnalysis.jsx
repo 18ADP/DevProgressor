@@ -1,5 +1,4 @@
 // src/components/SkillGapAnalysis.jsx
-import { useChat } from '@ai-sdk/react';
 import React, { useState, useMemo } from 'react';
 import { marked } from 'marked';
 import AIFeedback from './AIFeedback';
@@ -17,9 +16,9 @@ const escapeRegExp = (string) => {
 export default function SkillGapAnalysis({ resumeText }) {
   const [selectedRole, setSelectedRole] = useState("Full Stack Developer");
 
-  const { messages, append, isLoading, error } = useChat({
-    api: '/api/analyze',
-  });
+  const [aiResponse, setAiResponse] = useState('');
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
+  const [aiError, setAiError] = useState(null);
 
   const analysis = useMemo(() => {
     if (!resumeText) return { matched: [], missing: TARGET_ROLES[selectedRole], matchPercentage: 0 };
@@ -34,12 +33,57 @@ export default function SkillGapAnalysis({ resumeText }) {
     return { matched: matchedSkills, missing: missingSkills, matchPercentage };
   }, [resumeText, selectedRole]);
 
-  const handleGetAIFeedback = () => {
-    const prompt = `You are an expert career coach. Analyze the following resume text for a candidate targeting a "${selectedRole}" position. Provide personalized, actionable feedback in Markdown format with two sections: "Resume Improvement Suggestions" and "Skill-Gap Action Plan".`;
-    append({ role: 'user', content: prompt });
+  const handleGetAIFeedback = async () => {
+    try {
+      setIsLoadingAI(true);
+      setAiError(null);
+      setAiResponse('');
+      
+      console.log('Starting AI feedback generation...');
+      console.log('Resume text length:', resumeText?.length || 0);
+      console.log('Selected role:', selectedRole);
+      
+      const prompt = `You are an expert career coach. Analyze the following resume text for a candidate targeting a "${selectedRole}" position. Provide personalized, actionable feedback in Markdown format with two sections: "Resume Improvement Suggestions" and "Skill-Gap Action Plan".
+
+Resume Text:
+${resumeText || 'No resume text provided'}
+
+Target Role: ${selectedRole}
+Current Skills Match: ${analysis.matchPercentage}%
+Matched Skills: ${analysis.matched.join(', ')}
+Missing Skills: ${analysis.missing.join(', ')}
+
+Please provide specific, actionable advice based on this information.`;
+      
+      console.log('Sending prompt to AI:', prompt.substring(0, 200) + '...');
+      
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ prompt }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('AI response received:', data);
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      setAiResponse(data.text);
+    } catch (error) {
+      console.error('Error in handleGetAIFeedback:', error);
+      setAiError(error.message);
+    } finally {
+      setIsLoadingAI(false);
+    }
   };
-  
-  const aiFeedback = messages.findLast(m => m.role === 'assistant')?.content;
 
   return (
     <div className="bg-white dark:bg-slate-800 p-8 rounded-xl shadow-lg space-y-6">
@@ -94,22 +138,22 @@ export default function SkillGapAnalysis({ resumeText }) {
         <p className="text-slate-600 dark:text-slate-400 mb-4">Go beyond keywords. Get a personalized analysis of your resume's strengths and weaknesses.</p>
         <button
           onClick={handleGetAIFeedback}
-          disabled={isLoading}
+          disabled={isLoadingAI}
           className="w-full sm:w-auto bg-slate-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-slate-800 transition disabled:opacity-50"
         >
-          {isLoading ? '✨ Analyzing with Gemini...' : 'Get Personalized AI Feedback'}
+          {isLoadingAI ? '✨ Analyzing with Gemini...' : 'Get Personalized AI Feedback'}
         </button>
       </div>
 
-      {error && (
+      {aiError && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
           <strong className="font-bold">Error: </strong>
-          <span className="block sm:inline">{error.message}</span>
+          <span className="block sm:inline">{aiError}</span>
         </div>
       )}
 
-      {(aiFeedback || isLoading) && (
-         <AIFeedback feedback={aiFeedback} isLoading={isLoading} />
+      {(aiResponse || isLoadingAI) && (
+         <AIFeedback feedback={aiResponse} isLoading={isLoadingAI} />
       )}
     </div>
   );
