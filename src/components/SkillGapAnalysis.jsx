@@ -57,6 +57,57 @@ Please provide specific, actionable advice based on this information.`;
       
       console.log('Sending prompt to AI:', prompt.substring(0, 200) + '...');
       
+      // Check if we're in development mode and API is not available
+      const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      
+      if (isLocalDev) {
+        // For local development, use a mock response
+        console.log('Running locally - using mock response');
+        
+        // Simulate API delay
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const mockResponse = `# AI-Powered Resume Analysis for ${selectedRole}
+
+## Resume Improvement Suggestions
+
+Based on your resume analysis, here are specific recommendations to improve your chances for a **${selectedRole}** position:
+
+### Strengths to Highlight
+- **Skills Match**: You currently have a ${analysis.matchPercentage}% match with the target role requirements
+- **Strong Areas**: ${analysis.matched.length > 0 ? analysis.matched.slice(0, 3).join(', ') : 'Focus on building technical skills'}
+
+### Areas for Improvement
+- **Missing Skills**: ${analysis.missing.length > 0 ? analysis.missing.slice(0, 3).join(', ') : 'Core technical skills'}
+- **Resume Format**: Ensure your resume clearly showcases your technical abilities
+- **Project Examples**: Include specific projects that demonstrate your skills
+
+## Skill-Gap Action Plan
+
+### Immediate Actions (Next 2-4 weeks)
+1. **Focus on Missing Skills**: Prioritize learning ${analysis.missing.length > 0 ? analysis.missing[0] : 'JavaScript'} and ${analysis.missing.length > 1 ? analysis.missing[1] : 'React'}
+2. **Build Portfolio Projects**: Create 2-3 projects using the skills you're learning
+3. **Update Resume**: Incorporate new skills and projects
+
+### Medium-term Goals (1-3 months)
+1. **Complete Online Courses**: Focus on ${selectedRole}-specific training
+2. **Practice Coding**: Daily practice on platforms like LeetCode or HackerRank
+3. **Network**: Connect with professionals in your target role
+
+### Long-term Strategy (3-6 months)
+1. **Advanced Skills**: Move beyond basics to intermediate/advanced concepts
+2. **Real-world Experience**: Contribute to open source or freelance projects
+3. **Certifications**: Consider relevant certifications for your target role
+
+---
+
+*Note: This is a development mock response. In production on Vercel, you'll receive real AI-powered analysis from Google's Gemini AI.*`;
+
+        setAiResponse(mockResponse);
+        return;
+      }
+      
+      // For production, call the actual API
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: {
@@ -66,17 +117,66 @@ Please provide specific, actionable advice based on this information.`;
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
-      console.log('AI response received:', data);
+      // Check if response is streaming or JSON
+      const contentType = response.headers.get('content-type');
       
-      if (data.error) {
-        throw new Error(data.error);
+      if (contentType && contentType.includes('text/plain')) {
+        // Handle streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
+            
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                
+                if (data === '[DONE]') {
+                  break;
+                }
+                
+                try {
+                  const parsed = JSON.parse(data);
+                  if (parsed.text) {
+                    fullText += parsed.text;
+                    setAiResponse(fullText);
+                  }
+                } catch (e) {
+                  console.log('Non-JSON data received:', data);
+                }
+              }
+            }
+          }
+        } finally {
+          reader.releaseLock();
+        }
+
+        console.log('AI streaming response completed');
+      } else {
+        // Handle JSON response (for development mock)
+        const data = await response.json();
+        console.log('AI JSON response received:', data);
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        
+        setAiResponse(data.text);
+        console.log('AI JSON response completed');
       }
       
-      setAiResponse(data.text);
     } catch (error) {
       console.error('Error in handleGetAIFeedback:', error);
       setAiError(error.message);
