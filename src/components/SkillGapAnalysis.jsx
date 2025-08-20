@@ -15,7 +15,6 @@ const escapeRegExp = (string) => {
 
 export default function SkillGapAnalysis({ resumeText }) {
   const [selectedRole, setSelectedRole] = useState("Full Stack Developer");
-
   const [aiResponse, setAiResponse] = useState('');
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [aiError, setAiError] = useState(null);
@@ -65,7 +64,7 @@ Please provide specific, actionable advice based on this information.`;
         console.log('Running locally - using mock response');
         
         // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         const mockResponse = `# AI-Powered Resume Analysis for ${selectedRole}
 
@@ -108,24 +107,44 @@ Based on your resume analysis, here are specific recommendations to improve your
       }
       
       // For production, call the actual API
+      console.log('Making API call to /api/analyze');
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ prompt }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
+      console.log('API Response status:', response.status);
+      console.log('API Response headers:', Object.fromEntries(response.headers.entries()));
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+          console.error('API Error details:', errorData);
+        } catch (e) {
+          console.error('Could not parse error response as JSON');
+        }
+        throw new Error(errorMessage);
       }
 
       // Check if response is streaming or JSON
       const contentType = response.headers.get('content-type');
+      console.log('Response content type:', contentType);
       
       if (contentType && contentType.includes('text/plain')) {
         // Handle streaming response
+        console.log('Processing streaming response');
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let fullText = '';
@@ -134,27 +153,38 @@ Based on your resume analysis, here are specific recommendations to improve your
           while (true) {
             const { done, value } = await reader.read();
             
-            if (done) break;
+            if (done) {
+              console.log('Streaming completed');
+              break;
+            }
             
-            const chunk = decoder.decode(value);
+            const chunk = decoder.decode(value, { stream: true });
+            console.log('Received chunk:', chunk.substring(0, 100) + '...');
+            
             const lines = chunk.split('\n');
             
             for (const line of lines) {
               if (line.startsWith('data: ')) {
-                const data = line.slice(6);
+                const data = line.slice(6).trim();
                 
                 if (data === '[DONE]') {
+                  console.log('Received DONE signal');
                   break;
                 }
                 
                 try {
                   const parsed = JSON.parse(data);
+                  if (parsed.error) {
+                    throw new Error(parsed.error);
+                  }
                   if (parsed.text) {
                     fullText += parsed.text;
                     setAiResponse(fullText);
                   }
-                } catch (e) {
-                  console.log('Non-JSON data received:', data);
+                } catch (parseError) {
+                  if (data !== '') { // Ignore empty data
+                    console.log('Non-JSON data received:', data);
+                  }
                 }
               }
             }
@@ -163,9 +193,9 @@ Based on your resume analysis, here are specific recommendations to improve your
           reader.releaseLock();
         }
 
-        console.log('AI streaming response completed');
+        console.log('AI streaming response completed, total length:', fullText.length);
       } else {
-        // Handle JSON response (for development mock)
+        // Handle JSON response (fallback)
         const data = await response.json();
         console.log('AI JSON response received:', data);
         
@@ -173,13 +203,20 @@ Based on your resume analysis, here are specific recommendations to improve your
           throw new Error(data.error);
         }
         
-        setAiResponse(data.text);
-        console.log('AI JSON response completed');
+        setAiResponse(data.text || data.response || 'No response received');
       }
       
     } catch (error) {
       console.error('Error in handleGetAIFeedback:', error);
-      setAiError(error.message);
+      
+      let errorMessage = error.message;
+      if (error.name === 'AbortError') {
+        errorMessage = 'Request timed out. Please try again.';
+      } else if (!navigator.onLine) {
+        errorMessage = 'No internet connection. Please check your network.';
+      }
+      
+      setAiError(errorMessage);
     } finally {
       setIsLoadingAI(false);
     }
@@ -198,7 +235,7 @@ Based on your resume analysis, here are specific recommendations to improve your
         </select>
       </div>
 
-      {/* --- THIS IS THE SECTION THAT WAS MISSING --- */}
+      {/* Role Match Progress Bar */}
       <div>
         <div className="flex justify-between mb-1">
           <span className="text-base font-medium text-indigo-700 dark:text-white">Role Match</span>
@@ -209,6 +246,7 @@ Based on your resume analysis, here are specific recommendations to improve your
         </div>
       </div>
 
+      {/* Matched Skills */}
       <div>
         <h4 className="text-lg font-semibold text-green-600 dark:text-green-400 mb-3">Matched Skills ({analysis.matched.length})</h4>
         <div className="flex flex-wrap gap-3">
@@ -222,6 +260,7 @@ Based on your resume analysis, here are specific recommendations to improve your
         </div>
       </div>
       
+      {/* Missing Skills */}
       <div>
         <h4 className="text-lg font-semibold text-yellow-600 dark:text-yellow-400 mb-3">Missing Skills ({analysis.missing.length})</h4>
         <div className="flex flex-wrap gap-3">
@@ -232,26 +271,34 @@ Based on your resume analysis, here are specific recommendations to improve your
           ))}
         </div>
       </div>
-      {/* --- END OF MISSING SECTION --- */}
 
+      {/* AI Feedback Button */}
       <div className="border-t border-slate-200 dark:border-slate-700 pt-6 text-center">
         <p className="text-slate-600 dark:text-slate-400 mb-4">Go beyond keywords. Get a personalized analysis of your resume's strengths and weaknesses.</p>
         <button
           onClick={handleGetAIFeedback}
           disabled={isLoadingAI}
-          className="w-full sm:w-auto bg-slate-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-slate-800 transition disabled:opacity-50"
+          className="w-full sm:w-auto bg-slate-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isLoadingAI ? '✨ Analyzing with Gemini...' : 'Get Personalized AI Feedback'}
         </button>
       </div>
 
+      {/* Error Display */}
       {aiError && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
           <strong className="font-bold">Error: </strong>
           <span className="block sm:inline">{aiError}</span>
+          <button 
+            onClick={() => setAiError(null)}
+            className="absolute top-0 bottom-0 right-0 px-4 py-3"
+          >
+            <span className="text-red-500 hover:text-red-700">✕</span>
+          </button>
         </div>
       )}
 
+      {/* AI Feedback Display */}
       {(aiResponse || isLoadingAI) && (
          <AIFeedback feedback={aiResponse} isLoading={isLoadingAI} />
       )}
