@@ -1,52 +1,44 @@
-// api/analyze.js
+// api/analyze.js - Node.js Runtime Version
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// This tells Vercel to run this function on its fast "Edge" network.
-export const runtime = 'edge';
+// Use Node.js runtime instead of Edge
+// export const runtime = 'nodejs'; // Uncomment this line if Edge runtime doesn't work
 
-// This is the main serverless function handler for Vercel production.
-export default async function handler(request) {
-  // Only allow POST requests
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
-    });
+export default async function handler(req, res) {
+  console.log('Node.js Handler called:', { method: req.method, hasBody: !!req.body });
+
+  // Handle CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // Parse JSON body from Request object (Web API)
-    const body = await request.json();
-    const { prompt } = body;
+    const { prompt } = req.body;
     
-    console.log('Received request body:', { promptLength: prompt?.length || 0 });
+    console.log('Received request:', { 
+      hasPrompt: !!prompt, 
+      promptLength: prompt?.length || 0 
+    });
     
     if (!prompt) {
-      return new Response(JSON.stringify({ error: "No prompt provided" }), {
-        status: 400,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
+      return res.status(400).json({ error: "No prompt provided" });
     }
 
     // Check if API key is available
     const apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
       console.error("GOOGLE_API_KEY environment variable is not set");
-      return new Response(JSON.stringify({ 
+      return res.status(500).json({ 
         error: "API key not configured. Please set GOOGLE_API_KEY in your Vercel environment variables.",
         details: "This API is designed to run on Vercel with the GOOGLE_API_KEY environment variable set."
-      }), {
-        status: 500,
-        headers: { 
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-        },
       });
     }
 
@@ -62,77 +54,65 @@ export default async function handler(request) {
       },
     });
 
-    // Use streaming for better user experience
-    const streamingResponse = await model.generateContentStream({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    // Set up Server-Sent Events
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
     });
 
-    // Create a proper streaming response that's compatible with the frontend
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          console.log("Starting stream processing...");
-          
-          for await (const chunk of streamingResponse.stream) {
-            const text = chunk.text();
-            if (text) {
-              console.log("Streaming chunk:", text.substring(0, 50) + "...");
-              // Send each chunk as Server-Sent Events format
-              const data = `data: ${JSON.stringify({ text, type: 'text-delta' })}\n\n`;
-              controller.enqueue(new TextEncoder().encode(data));
-            }
-          }
-          
-          // Send completion signal
-          console.log("Stream completed, sending DONE signal");
-          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
-          controller.close();
-        } catch (error) {
-          console.error('Streaming error:', error);
-          // Send error through stream
-          const errorData = `data: ${JSON.stringify({ error: error.message, type: 'error' })}\n\n`;
-          controller.enqueue(new TextEncoder().encode(errorData));
-          controller.close();
+    try {
+      // Use streaming for better user experience
+      const streamingResponse = await model.generateContentStream({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      });
+
+      console.log("Starting stream processing...");
+      let hasContent = false;
+      
+      for await (const chunk of streamingResponse.stream) {
+        const text = chunk.text();
+        if (text) {
+          hasContent = true;
+          console.log("Streaming chunk received, length:", text.length);
+          const data = `data: ${JSON.stringify({ text, type: 'text-delta' })}\n\n`;
+          res.write(data);
         }
-      },
-    });
+      }
+      
+      if (!hasContent) {
+        console.warn("No content received from AI");
+        const errorData = `data: ${JSON.stringify({ error: 'No content generated', type: 'error' })}\n\n`;
+        res.write(errorData);
+      }
+      
+      // Send completion signal
+      console.log("Stream completed, sending DONE signal");
+      res.write('data: [DONE]\n\n');
+      res.end();
 
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
-    });
+    } catch (streamError) {
+      console.error('Streaming error:', streamError);
+      const errorData = `data: ${JSON.stringify({ error: streamError.message, type: 'error' })}\n\n`;
+      res.write(errorData);
+      res.end();
+    }
 
   } catch (error) {
     console.error("Error in API route:", error);
-    // Return a structured error response
-    return new Response(JSON.stringify({ 
-      error: "Failed to generate feedback.", 
-      details: error.message,
-      hint: "Make sure your Vercel deployment has the GOOGLE_API_KEY environment variable set."
-    }), {
-      status: 500,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
-    });
+    console.error("Error stack:", error.stack);
+    
+    if (!res.headersSent) {
+      return res.status(500).json({ 
+        error: "Failed to generate feedback.", 
+        details: error.message,
+        hint: "Make sure your Vercel deployment has the GOOGLE_API_KEY environment variable set."
+      });
+    } else {
+      // If headers already sent (streaming started), send error through stream
+      const errorData = `data: ${JSON.stringify({ error: error.message, type: 'error' })}\n\n`;
+      res.write(errorData);
+      res.end();
+    }
   }
-}
-
-// Handle CORS preflight requests
-export async function OPTIONS(request) {
-  return new Response(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  });
 }
