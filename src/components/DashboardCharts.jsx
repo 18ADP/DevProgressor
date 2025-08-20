@@ -51,12 +51,37 @@ export default function DashboardCharts({ entries }) {
     };
   }, [entries]);
 
+  // Chart options to configure y-axis to show only whole numbers
+  const chartOptions = React.useMemo(() => ({
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: false,
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        ticks: {
+          stepSize: 1, // Force steps of 1
+          callback: function(value) {
+            // Only show integer values
+            return Number.isInteger(value) ? value : '';
+          },
+        },
+      },
+    },
+  }), []);
+
   return (
     <div className="bg-white dark:bg-slate-800 p-8 rounded-xl shadow-lg">
       <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Journal Activity Trend</h3>
       {/* Conditionally render the chart only if there's enough data to show a trend */}
       {entries.length > 1 ? (
-        <Line data={journalTrendData} />
+        <Line data={journalTrendData} options={chartOptions} />
       ) : (
         <p className="text-slate-500 dark:text-slate-400 text-center pt-8">
           Add more journal entries to see your activity trend.
