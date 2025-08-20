@@ -65,6 +65,8 @@ export default function DashboardCharts({ entries }) {
     scales: {
       y: {
         beginAtZero: true,
+        min: 0,
+        max: 8,
         ticks: {
           stepSize: 1, // Force steps of 1
           callback: function(value) {
