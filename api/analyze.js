@@ -1,13 +1,13 @@
-
+// api/analyze.js — Node.js runtime version using OpenAI API
 
 export const config = {
-  runtime: 'nodejs', // ensure Node runtime, not Edge
+  runtime: 'nodejs',
 };
 
 export default async function handler(req, res) {
-  console.log('Node.js Handler called:', { method: req.method, hasBody: !!req.body });
+  console.log('Handler called:', { method: req.method, hasBody: !!req.body });
 
-  // ----- CORS HANDLING -----
+  // ----- CORS -----
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -23,27 +23,20 @@ export default async function handler(req, res) {
   try {
     const { prompt } = req.body;
 
-    console.log('Received request:', {
-      hasPrompt: !!prompt,
-      promptLength: prompt?.length || 0,
-    });
-
     if (!prompt) {
       return res.status(400).json({ error: 'No prompt provided' });
     }
 
-    // ----- CHECK API KEY -----
-    const apiKey = process.env.GOOGLE_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      console.error('GOOGLE_API_KEY environment variable is not set');
+      console.error('OPENAI_API_KEY not set');
       return res.status(500).json({
-        error: 'API key not configured. Please set GOOGLE_API_KEY in your Vercel environment variables.',
-        details: 'This API is designed to run on Vercel with the GOOGLE_API_KEY environment variable set.',
+        error: 'Missing OpenAI API key',
+        details: 'Set OPENAI_API_KEY in your Vercel environment variables.',
       });
     }
 
     console.log('Starting AI feedback generation...');
-    console.log('Prompt snippet:', prompt.substring(0, 100) + '...');
 
     // ----- STREAMING RESPONSE HEADERS -----
     res.writeHead(200, {
@@ -52,77 +45,97 @@ export default async function handler(req, res) {
       Connection: 'keep-alive',
     });
 
-    // ----- DIRECT CALL TO GEMINI v1 API -----
-    const response = await fetch(
-      'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:streamGenerateContent?alt=sse',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: prompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 2048,
+    // ----- STREAM FROM OPENAI -----
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are an expert career coach. Analyze resumes and provide precise, actionable feedback.',
           },
-        }),
-      }
-    );
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.7,
+        stream: true,
+      }),
+    });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Gemini API Error:', errorText);
-      res.write(`data: ${JSON.stringify({ error: errorText, type: 'error' })}\n\n`);
+      const err = await response.text();
+      console.error('OpenAI API error:', err);
+      res.write(`data: ${JSON.stringify({ error: err, type: 'error' })}\n\n`);
       return res.end();
     }
 
-    console.log('Gemini API connected, streaming in progress...');
+    console.log('Streaming response from OpenAI...');
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let hasContent = false;
 
-    // ----- STREAM DATA TO FRONTEND -----
+    let hasContent = false;
+    let buffer = '';
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
       const chunk = decoder.decode(value, { stream: true });
+      buffer += chunk;
 
-      if (chunk.trim() !== '') {
-        hasContent = true;
-        res.write(chunk); // Forward SSE chunk as-is
+      // Process chunks line-by-line (Server-Sent Events format)
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data:')) {
+          const data = trimmed.replace(/^data:\s*/, '');
+          if (data === '[DONE]') {
+            res.write('data: [DONE]\n\n');
+            res.end();
+            console.log('Stream completed');
+            return;
+          }
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              hasContent = true;
+              res.write(`data: ${JSON.stringify({ text: delta, type: 'text-delta' })}\n\n`);
+            }
+          } catch {
+            // ignore keep-alives or malformed lines
+          }
+        }
       }
     }
 
     if (!hasContent) {
-      console.warn('No content received from AI');
+      console.warn('No content received from OpenAI');
       res.write(`data: ${JSON.stringify({ error: 'No content generated', type: 'error' })}\n\n`);
     }
 
-    console.log('AI streaming completed.');
     res.write('data: [DONE]\n\n');
     res.end();
   } catch (error) {
     console.error('Error in API route:', error);
-    console.error('Error stack:', error.stack);
-
     if (!res.headersSent) {
       return res.status(500).json({
         error: 'Failed to generate feedback.',
         details: error.message,
-        hint: 'Ensure GOOGLE_API_KEY is set in Vercel and valid for Gemini API v1.',
       });
     } else {
-      const errorData = `data: ${JSON.stringify({ error: error.message, type: 'error' })}\n\n`;
-      res.write(errorData);
+      res.write(`data: ${JSON.stringify({ error: error.message, type: 'error' })}\n\n`);
       res.end();
     }
   }
