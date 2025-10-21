@@ -32,196 +32,71 @@ export default function SkillGapAnalysis({ resumeText }) {
     return { matched: matchedSkills, missing: missingSkills, matchPercentage };
   }, [resumeText, selectedRole]);
 
+  // -----------------------
+  // 🧠 Simulated AI Feedback
+  // -----------------------
   const handleGetAIFeedback = async () => {
     try {
       setIsLoadingAI(true);
       setAiError(null);
       setAiResponse('');
-      
-      console.log('Starting AI feedback generation...');
-      console.log('Resume text length:', resumeText?.length || 0);
+
+      console.log('Simulating AI feedback generation...');
       console.log('Selected role:', selectedRole);
-      
-      const prompt = `You are an expert career coach. Analyze the following resume text for a candidate targeting a "${selectedRole}" position. Provide personalized, actionable feedback in Markdown format with two sections: "Resume Improvement Suggestions" and "Skill-Gap Action Plan".
+      console.log('Resume text length:', resumeText?.length || 0);
 
-Resume Text:
-${resumeText || 'No resume text provided'}
+      // Simulate AI "thinking" delay
+      await new Promise(resolve => setTimeout(resolve, 2500));
 
-Target Role: ${selectedRole}
-Current Skills Match: ${analysis.matchPercentage}%
-Matched Skills: ${analysis.matched.join(', ')}
-Missing Skills: ${analysis.missing.join(', ')}
-
-Please provide specific, actionable advice based on this information.`;
-      
-      console.log('Sending prompt to AI:', prompt.substring(0, 200) + '...');
-      
-      // Check if we're in development mode and API is not available
-      const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      
-      if (isLocalDev) {
-        // For local development, use a mock response
-        console.log('Running locally - using mock response');
-        
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        const mockResponse = `# AI-Powered Resume Analysis for ${selectedRole}
+      const mockResponse = `# 🧠 AI-Powered Resume Analysis for ${selectedRole}
 
 ## Resume Improvement Suggestions
 
-Based on your resume analysis, here are specific recommendations to improve your chances for a **${selectedRole}** position:
+Based on your resume analysis, here are personalized recommendations to improve your chances for a **${selectedRole}** position:
 
-### Strengths to Highlight
-- **Skills Match**: You currently have a ${analysis.matchPercentage}% match with the target role requirements
-- **Strong Areas**: ${analysis.matched.length > 0 ? analysis.matched.slice(0, 3).join(', ') : 'Focus on building technical skills'}
+### 🌟 Strengths to Highlight
+- **Skills Match:** You currently have a ${analysis.matchPercentage}% alignment with the target role requirements.
+- **Strong Areas:** ${analysis.matched.length > 0 ? analysis.matched.slice(0, 3).join(', ') : 'Focus on strengthening your technical core.'}
+- Clear structure and professional formatting that communicates your experience effectively.
 
-### Areas for Improvement
-- **Missing Skills**: ${analysis.missing.length > 0 ? analysis.missing.slice(0, 3).join(', ') : 'Core technical skills'}
-- **Resume Format**: Ensure your resume clearly showcases your technical abilities
-- **Project Examples**: Include specific projects that demonstrate your skills
+### ⚠️ Areas for Improvement
+- **Missing Skills:** ${analysis.missing.length > 0 ? analysis.missing.slice(0, 3).join(', ') : 'No major gaps detected — great job!'}
+- **Quantify Achievements:** Add measurable outcomes (e.g., "Improved API performance by 25%").
+- **Project Examples:** Showcase 2–3 key projects that highlight your technical depth.
 
-## Skill-Gap Action Plan
+## 🧩 Skill-Gap Action Plan
 
-### Immediate Actions (Next 2-4 weeks)
-1. **Focus on Missing Skills**: Prioritize learning ${analysis.missing.length > 0 ? analysis.missing[0] : 'JavaScript'} and ${analysis.missing.length > 1 ? analysis.missing[1] : 'React'}
-2. **Build Portfolio Projects**: Create 2-3 projects using the skills you're learning
-3. **Update Resume**: Incorporate new skills and projects
+### Immediate Actions (Next 2–4 Weeks)
+1. **Focus on Missing Skills:** Prioritize learning ${analysis.missing.length > 0 ? analysis.missing[0] : 'JavaScript'} and ${analysis.missing.length > 1 ? analysis.missing[1] : 'React'}.
+2. **Build Portfolio Projects:** Create 1–2 short projects applying these skills.
+3. **Update Resume:** Add these new projects and highlight practical impact.
 
-### Medium-term Goals (1-3 months)
-1. **Complete Online Courses**: Focus on ${selectedRole}-specific training
-2. **Practice Coding**: Daily practice on platforms like LeetCode or HackerRank
-3. **Network**: Connect with professionals in your target role
+### Medium-Term Goals (1–3 Months)
+1. **Certifications or Courses:** Take online training for ${selectedRole}.
+2. **Coding Practice:** Use LeetCode or HackerRank regularly to sharpen your problem-solving.
+3. **Networking:** Engage with developer communities and share your work.
 
-### Long-term Strategy (3-6 months)
-1. **Advanced Skills**: Move beyond basics to intermediate/advanced concepts
-2. **Real-world Experience**: Contribute to open source or freelance projects
-3. **Certifications**: Consider relevant certifications for your target role
+### Long-Term Strategy (3–6 Months)
+1. **Deepen Expertise:** Advance to intermediate/advanced topics in ${selectedRole === 'Full Stack Developer' ? 'React and Node.js' : selectedRole}.
+2. **Gain Experience:** Contribute to open source, freelance, or internships.
+3. **Professional Growth:** Earn certifications or mentorship to boost credibility.
 
 ---
 
-*Note: This is a development mock response. In production on Vercel, you'll receive real AI-powered analysis from Google's Gemini AI.*`;
+✨ *Note: This is a simulated AI response created for demonstration purposes. In a live production environment, this section would be dynamically generated by an AI model such as Gemini or OpenAI.*`;
 
-        setAiResponse(mockResponse);
-        return;
-      }
-      
-      // For production, call the actual API
-      console.log('Making API call to /api/analyze');
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-      
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ prompt }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      console.log('API Response status:', response.status);
-      console.log('API Response headers:', Object.fromEntries(response.headers.entries()));
-
-      if (!response.ok) {
-        let errorMessage = `HTTP error! status: ${response.status}`;
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
-          console.error('API Error details:', errorData);
-        } catch (e) {
-          console.error('Could not parse error response as JSON');
-        }
-        throw new Error(errorMessage);
-      }
-
-      // Check if response is streaming or JSON
-      const contentType = response.headers.get('content-type');
-      console.log('Response content type:', contentType);
-      
-      if (contentType && contentType.includes('text/plain')) {
-        // Handle streaming response
-        console.log('Processing streaming response');
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = '';
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            
-            if (done) {
-              console.log('Streaming completed');
-              break;
-            }
-            
-            const chunk = decoder.decode(value, { stream: true });
-            console.log('Received chunk:', chunk.substring(0, 100) + '...');
-            
-            const lines = chunk.split('\n');
-            
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6).trim();
-                
-                if (data === '[DONE]') {
-                  console.log('Received DONE signal');
-                  break;
-                }
-                
-                try {
-                  const parsed = JSON.parse(data);
-                  if (parsed.error) {
-                    throw new Error(parsed.error);
-                  }
-                  if (parsed.text) {
-                    fullText += parsed.text;
-                    setAiResponse(fullText);
-                  }
-                } catch (parseError) {
-                  if (data !== '') { // Ignore empty data
-                    console.log('Non-JSON data received:', data);
-                  }
-                }
-              }
-            }
-          }
-        } finally {
-          reader.releaseLock();
-        }
-
-        console.log('AI streaming response completed, total length:', fullText.length);
-      } else {
-        // Handle JSON response (fallback)
-        const data = await response.json();
-        console.log('AI JSON response received:', data);
-        
-        if (data.error) {
-          throw new Error(data.error);
-        }
-        
-        setAiResponse(data.text || data.response || 'No response received');
-      }
-      
+      setAiResponse(mockResponse);
     } catch (error) {
       console.error('Error in handleGetAIFeedback:', error);
-      
-      let errorMessage = error.message;
-      if (error.name === 'AbortError') {
-        errorMessage = 'Request timed out. Please try again.';
-      } else if (!navigator.onLine) {
-        errorMessage = 'No internet connection. Please check your network.';
-      }
-      
-      setAiError(errorMessage);
+      setAiError('Failed to generate AI feedback.');
     } finally {
       setIsLoadingAI(false);
     }
   };
 
+  // -----------------------
+  // 🧩 UI Rendering
+  // -----------------------
   return (
     <div className="bg-white dark:bg-slate-800 p-8 rounded-xl shadow-lg space-y-6">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
@@ -231,7 +106,9 @@ Based on your resume analysis, here are specific recommendations to improve your
           onChange={(e) => setSelectedRole(e.target.value)}
           className="p-2 border border-slate-300 rounded-lg bg-white dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-indigo-500"
         >
-          {Object.keys(TARGET_ROLES).map(role => <option key={role} value={role}>{role}</option>)}
+          {Object.keys(TARGET_ROLES).map(role => (
+            <option key={role} value={role}>{role}</option>
+          ))}
         </select>
       </div>
 
@@ -242,30 +119,47 @@ Based on your resume analysis, here are specific recommendations to improve your
           <span className="text-sm font-medium text-indigo-700 dark:text-white">{analysis.matchPercentage}%</span>
         </div>
         <div className="w-full bg-slate-200 rounded-full h-4 dark:bg-slate-700">
-          <div className="bg-indigo-600 h-4 rounded-full transition-all duration-500" style={{ width: `${analysis.matchPercentage}%` }}></div>
+          <div
+            className="bg-indigo-600 h-4 rounded-full transition-all duration-500"
+            style={{ width: `${analysis.matchPercentage}%` }}
+          ></div>
         </div>
       </div>
 
       {/* Matched Skills */}
       <div>
-        <h4 className="text-lg font-semibold text-green-600 dark:text-green-400 mb-3">Matched Skills ({analysis.matched.length})</h4>
+        <h4 className="text-lg font-semibold text-green-600 dark:text-green-400 mb-3">
+          Matched Skills ({analysis.matched.length})
+        </h4>
         <div className="flex flex-wrap gap-3">
           {analysis.matched.length > 0 ? (
             analysis.matched.map(skill => (
-              <span key={skill} className="bg-green-100 text-green-800 text-sm font-medium px-3 py-1 rounded-full dark:bg-green-900 dark:text-green-200">
+              <span
+                key={skill}
+                className="bg-green-100 text-green-800 text-sm font-medium px-3 py-1 rounded-full dark:bg-green-900 dark:text-green-200"
+              >
                 {skill}
               </span>
             ))
-          ) : <p className="text-slate-500 text-sm">No matched skills found for this role in the resume.</p>}
+          ) : (
+            <p className="text-slate-500 text-sm">
+              No matched skills found for this role in the resume.
+            </p>
+          )}
         </div>
       </div>
-      
+
       {/* Missing Skills */}
       <div>
-        <h4 className="text-lg font-semibold text-yellow-600 dark:text-yellow-400 mb-3">Missing Skills ({analysis.missing.length})</h4>
+        <h4 className="text-lg font-semibold text-yellow-600 dark:text-yellow-400 mb-3">
+          Missing Skills ({analysis.missing.length})
+        </h4>
         <div className="flex flex-wrap gap-3">
           {analysis.missing.map(skill => (
-            <span key={skill} className="bg-yellow-100 text-yellow-800 text-sm font-medium px-3 py-1 rounded-full dark:bg-yellow-900 dark:text-yellow-200">
+            <span
+              key={skill}
+              className="bg-yellow-100 text-yellow-800 text-sm font-medium px-3 py-1 rounded-full dark:bg-yellow-900 dark:text-yellow-200"
+            >
               {skill}
             </span>
           ))}
@@ -274,22 +168,27 @@ Based on your resume analysis, here are specific recommendations to improve your
 
       {/* AI Feedback Button */}
       <div className="border-t border-slate-200 dark:border-slate-700 pt-6 text-center">
-        <p className="text-slate-600 dark:text-slate-400 mb-4">Go beyond keywords. Get a personalized analysis of your resume's strengths and weaknesses.</p>
+        <p className="text-slate-600 dark:text-slate-400 mb-4">
+          Go beyond keywords. Get a personalized analysis of your resume's strengths and weaknesses.
+        </p>
         <button
           onClick={handleGetAIFeedback}
           disabled={isLoadingAI}
           className="w-full sm:w-auto bg-slate-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isLoadingAI ? '✨ Analyzing with Gemini...' : 'Get Personalized AI Feedback'}
+          {isLoadingAI ? '✨ Generating AI Feedback...' : 'Get Personalized AI Feedback'}
         </button>
       </div>
 
       {/* Error Display */}
       {aiError && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+        <div
+          className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative"
+          role="alert"
+        >
           <strong className="font-bold">Error: </strong>
           <span className="block sm:inline">{aiError}</span>
-          <button 
+          <button
             onClick={() => setAiError(null)}
             className="absolute top-0 bottom-0 right-0 px-4 py-3"
           >
@@ -300,7 +199,7 @@ Based on your resume analysis, here are specific recommendations to improve your
 
       {/* AI Feedback Display */}
       {(aiResponse || isLoadingAI) && (
-         <AIFeedback feedback={aiResponse} isLoading={isLoadingAI} />
+        <AIFeedback feedback={aiResponse} isLoading={isLoadingAI} />
       )}
     </div>
   );
