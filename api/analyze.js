@@ -1,13 +1,11 @@
-// api/analyze.js — Final, working Gemini (v1) API version
+// api/analyze.js — Final working Gemini 2.5 Flash integration (non-streaming)
 
 export const config = {
-  runtime: "nodejs",
+  runtime: "nodejs", // ensures it runs on Node.js runtime, not Edge
 };
 
 export default async function handler(req, res) {
-  console.log("Handler called:", { method: req.method, hasBody: !!req.body });
-
-  // --- CORS ---
+  // ----- CORS -----
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -17,89 +15,63 @@ export default async function handler(req, res) {
 
   try {
     const { prompt } = req.body;
-    if (!prompt) return res.status(400).json({ error: "Missing prompt" });
+
+    if (!prompt) {
+      return res.status(400).json({ error: "Missing prompt" });
+    }
 
     const apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
-      console.error("GOOGLE_API_KEY not set");
+      console.error("GOOGLE_API_KEY not configured.");
       return res.status(500).json({
-        error: "Missing Gemini API key",
-        details: "Set GOOGLE_API_KEY in your Vercel environment variables.",
+        error: "GOOGLE_API_KEY environment variable not set",
+        details: "Add GOOGLE_API_KEY in your Vercel project settings.",
       });
     }
 
-    console.log("Starting Gemini feedback generation...");
+    console.log("Starting Gemini 2.5 Flash generation...");
 
-    // --- Streaming headers ---
-    res.writeHead(200, {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
-
-    // --- Direct fetch to Gemini v1 endpoint ---
+    // ----- Gemini v1beta generateContent endpoint -----
     const response = await fetch(
-  `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:streamGenerateContent?key=${apiKey}`,
-  {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 2048,
-      },
-    }),
-  }
-);
-
-
-    if (!response.ok || !response.body) {
-      const errorText = await response.text();
-      console.error("Gemini API error:", errorText);
-      res.write(`data: ${JSON.stringify({ error: errorText, type: "error" })}\n\n`);
-      return res.end();
-    }
-
-    console.log("Streaming Gemini response...");
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let hasOutput = false;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-      if (chunk.trim()) {
-        hasOutput = true;
-        res.write(chunk); // forward raw SSE chunks directly to frontend
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 2048,
+          },
+        }),
       }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Gemini API error:", data);
+      return res.status(response.status).json({ error: data });
     }
 
-    if (!hasOutput) {
-      res.write(`data: ${JSON.stringify({ error: "No content generated", type: "error" })}\n\n`);
-    }
+    // ----- Extract text from response -----
+    const modelOutput =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
 
-    res.write("data: [DONE]\n\n");
-    res.end();
-    console.log("Gemini streaming complete.");
+    console.log("Gemini 2.5 Flash output length:", modelOutput.length);
+
+    // Return JSON result to frontend
+    res.status(200).json({ text: modelOutput });
   } catch (error) {
-    console.error("Error in Gemini handler:", error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: "Internal Server Error",
-        details: error.message,
-      });
-    } else {
-      res.write(`data: ${JSON.stringify({ error: error.message, type: "error" })}\n\n`);
-      res.end();
-    }
+    console.error("Gemini API route error:", error);
+    res.status(500).json({
+      error: "Internal Server Error",
+      details: error.message,
+    });
   }
 }
