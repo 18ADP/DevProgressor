@@ -34,8 +34,8 @@ export default function AIFeedback({ feedback, isLoading }) {
         This is safe here because we are controlling the source of the markdown.
       */}
       <div
-        className="prose prose-slate dark:prose-invert max-w-none"
-        dangerouslySetInnerHTML={{ __html: rawMarkup }}
+      className="prose prose-slate dark:prose-invert max-w-none break-words whitespace-pre-wrap"
+      dangerouslySetInnerHTML={{ __html: rawMarkup }}
       />
     </div>
   );
